@@ -1,0 +1,1641 @@
+--- 
+title: "Analysis of Common Agricultural Designs in R"
+author: "Sam Dumble"
+date: "`r Sys.Date()`"
+site: bookdown::bookdown_site
+output: bookdown::gitbook
+documentclass: book
+bibliography: [book.bib, packages.bib]
+biblio-style: apalike
+link-citations: yes
+description: "A series of guidance, tutorials and examples for dealing with the data analysis of experiments following common agricultural designs using R and RStudio"
+---
+
+# Preface 
+
+All of these tutorials assume that you have already been able to install R and RStudio onto your computer and that you have a reliable internet connection. For help with orientation of R for new users please see [add cross reference to an intro document].  
+1. RCBDs (Randomised complete block design) [add cross reference]  
+2. Split Plot Design [add cross reference]  
+3. Adjusting for Covariates [add cross reference]  
+4. Factorial designs and interactions [add cross reference]  
+5. Multi Environment Trials [add cross reference]   
+
+```{r include=FALSE}
+# automatically create a bib database for R packages
+knitr::write_bib(c(
+  .packages(), 'bookdown', 'knitr', 'rmarkdown',"emmeans","ggplot2","doBy","lmerTest","multcompView","GGEBiplots","datatable"
+), 'packages.bib')
+```
+
+
+<!--chapter:end:index.Rmd-->
+
+# Introduction {#intro}
+
+Different designs require different models. But in R, nearly all other steps are identical before and after model fitting – assuming that, regardless of the design, you are interested in more or less the same question:
+
+Assessing how a numeric response variable (e.g. yield) varies by a treatment factor, or factors. 
+
+Being able to learn and understand these steps, will let you analyse any data you have available from on-station trials! In these guides we will use the lmer function within R to fit (nearly) all the models we may want to consider for these agricultural designs. This fits a linear mixed effects regression model.
+A detailed explanation of these statistical models, and their applicability to agricultural analyses can be found here: https://www.jic.ac.uk/services/statistics/readingadvice/booklets/topmix.html .
+In short, these models enable us to separate out factors that are of interest to us (e.g. treatments, varieties) to factors which are not of interest to us, but that still introduce  (e.g. blocks).
+On-farm trials, less standard designs, and more complex outcome variables (e.g. disease scores, incidence rates, growth patterns) may require more care with analysis and more consideration in how to analyse and interpret results. Many of the general principles are the same, as is a large portion of the R syntax, but in these cases more care is needed to ensure a coherent analysis. There is no “recipe” which will work in the same way every time, each analysis may bring up new or unexpected considerations that need to be addressed rather than forcing the analysis to fit within a standard framework.
+
+## General Structure: R Syntax
+
+### Step 1: Load Libraries
+```
+library(ggplot2)
+library(emmeans)
+library(doBy)
+library(lmerTest)
+library(multcompView)
+```
+
+### Step 2: Import Data
+```
+mydata <- read.csv("C:/Users/Admin/Desktop/mydata.csv")
+```
+### Step 3: Check and update data
+```
+summary(mydata)
+str(mydata)
+mydata$treatment<-factor(mydata$treatment)
+```
+### Step 4. Explore data
+```
+ggplot(data= mydata,aes(y=response,x=treatment,col= block))+
+geom_point()
+
+summaryBy(response ~ treatment, data= mydata, FUN=c(mean,median,sd))
+```
+### Step 5. Specify a model for data
+```
+mymodel <-lmer(response~treatment+(1|block), data=mydata)
+```
+### Step 6. Check the model
+```
+plot(mymodel)
+
+qqnorm(resid(mymodel))
+qqline(resid(mymodel))
+```
+### Step 7. Interpret the model
+```
+anova(mymodel, ddf="Kenward-Roger")
+print(VarCorr(mymodel), comp=("Variance"))
+```
+### Step 8. Present the results from the model
+```
+emmip(mymodel,~treatment,CIs = TRUE)
+emmeans(mymodel, ~ treatment)
+cld(emmeans(mymodel, ~ treatment))
+```
+## General Structure: Explanation of Each Step
+
+### Step 1: Load Libraries
+R is an open-source piece of software. One major benefit of this is that many useful functions for importing, manipulating, analysing and presenting data have been created by other R users, beyond what is available in the “base” R packages. Many of these functions are implemented in packages, or libraries, which need to be downloaded and installed separately from your main R and RStudio installation. The main ones you will need to be able to follow this set of guides are:
+```ggplot2```: A powerful graphing package, allowing high quality graphs to be produced
+```doBy```: A package for easy and customisable calculations of summary statistics
+```lmerTest```: A package for fitting and evaluating linear mixed effects regression models, using REML (restricted maximum likelihood) methods as found in Genstat
+```emmeans```: A package to calculate estimated marginal means and confidence intervals from statistical models. Similar to EMMEANS in Genstat or LSMEANS in SAS.
+```multcompView```: A package for conducting mean separation analysis from mixed effects regression models
+To install these packages onto your computer you need an internet connection, and for a clean installation of R and RStudio onto your computer. You only need to install an R package once, using install.packages() or through the menus, but you do need to load the packages every time you come to use them using library().
+You can learn more about libraries here: https://www.datacamp.com/community/tutorials/r-packages-guide
+
+### Step 2: Import Data
+
+```
+mydata <- read.csv("C:/Users/Admin/Desktop/mydata.csv")
+```
+
+Key things to consider before even attempting to read your data into R:
+•	Is your data in a single sheet, in a continuous rectangle, with no blank rows or columns?
+•	Is there a single row at the top of your data containing the variable names?
+•	Are the variable names concise, but informative, and contain no spaces or punctuation?
+•	Are missing values consistently coded in your dataset?
+•	Are factor levels consistently coded in your dataset (even including case sensitive – R will consider “treatment A” and “Treatment a” as 2 different treatments.
+•	If you have dates in your data then are they always written in the same format?
+You can learn more about some of the important considerations of preparing your data for importing into R here: http://www.sthda.com/english/wiki/best-practices-in-preparing-data-files-for-importing-into-r
+
+### Step 3: Check and update data
+There can be many unforeseen issues when importing your dataset if it is not cleaned in the way you would like it to be. Checking the data, both visually, and using functions like summary() and str() can help you see if there have been any issues which may need addressing. Common problems you might see at this point would be:
+•	Variable names changing: if your variable names contained spaces, or punctuation, then R will change them and introduce extra dots into the name. Ideally you want variable names in R to be concise, and contain no punctuation. This will make writing the syntax much easier
+•	Missing value codes: If you have missing values in your dataset, check that R has imported these as missing values. If in Excel you have a blank cell then this will be imported correctly into R. If you are using a code (like -999 for example) R will not automatically recognise this as a missing value.
+•	Factors being treated as numbers
+
+These are largely the same concerns as in step 2; but being checked from within R rather than within Excel.
+
+Why is it important to make sure factor variables are treated as factors?
+
+We are often taught to use codes when entering and collecting data for categorical variables, such as treatment or variety. If we use numeric codes, i.e. 1,2,3,4 for 4 treatments, then we can potentially see problems with our analysis unless we specify explicitly that this is the case. This problem is not an issue is we use non-numeric codes for treatments, e.g. A,B,C,D. The same data is presented below twice; once with estimates of the treatment means from an analysis of a numeric treatment variable and once from a factor treatment variable.
+
+
+With the numeric variable the model tries to fit the treatment effect as if it is a continuous scale; i.e. that treatment 2 is 1 point higher than treatment 1. With the factor variable the model treats all 4 treatment groups as being independent of each other. In this case if we had not converted the treatment to a factor we would have had a completely useless model, telling us that there was no treatment effect and providing severe over-estimates of treatments 2 and 4 and a sever underestimate of treatment 3. In fact there is a very highly significant treatment effect in this data, which can only be identified from the analysis when the variable is treated as a factor. 
+
+### Step 4. Explore data
+
+Exploratory analysis helps us to understand the results we have found in our data. It can show us 
+•	if there are clear effects from visual inspection 
+•	the magnitude of any effects, 
+•	the variability in our results
+•	if our data is distributed in a way that will lead to a standard modelling approach
+We can also calculate summary statistics, such as means and percentages.
+
+http://r4ds.had.co.nz/exploratory-data-analysis.html
+
+### Step 5. Specify a model for data
+
+```
+mymodel <-lmer(response~treatment+(1|block),data=mydata)
+```
+Cross link to slides of examples for model construction.
+
+### Step 6. Check the model
+
+```
+plot(mymodel)
+```
+
+There are three main assumptions that are worthwhile considering when assessing if the model being fitted is valid from a statistical perspective.
+1.	“Independence”: This assumption can be met by including the dependencies within the design of the experiment within the model through the use of random effects. For example - two plots within the same block, may have some level of inter-relatedness. Including a “block” term in the model allows this assumption to be met in this instance.
+2.	“Homogeneity”: This assumption relates to whether the variability in each treatment group is similar. In order to calculate standard errors and p-values from the model an assumption is made that there is constant variance across all treatments. If this assumption does not hold then these standard errors and p-values will not be accurate. It is common in many situations to have more variability in high yielding treatments than in low yielding treatments. E.g. 4 treatments, each replicated 8 times
+ 
+### Step 7. Interpret the model
+```
+anova(mymodel, ddf="Kenward-Roger")
+print(VarCorr(mymodel), comp=("Variance"))
+```
+
+Summary of Kenward-Rogers degree of freedom from mixed models:
+https://www.jstatsoft.org/article/view/v082i13/v82i13.pdf
+
+### Step 8. Present the results from the model
+
+```
+emmip(mymodel,~treatment,CIs = TRUE)
+emmeans(mymodel, ~ treatment)
+cld(emmeans(mymodel, ~ treatment))
+
+```
+https://cran.r-project.org/web/packages/emmeans/vignettes/basics.html
+https://cran.r-project.org/web/packages/emmeans/vignettes/interactions.html
+
+## Other resources
+For other agricultural trials, particularly if you have slightly different hypotheses to this standard framework, this provides a useful resource and overview of using R for agricultural analyses: http://rstats4ag.org
+There are also specific examples of agricultural experiments with more complex designs, particularly in dealing with repeated measurements over time, in an R package called agriTutorial, which provides 5 specific case-studies of analysing field trial data in R. https://cran.r-project.org/web/packages/agriTutorial/agriTutorial.pdf
+
+<!--chapter:end:01-intro.Rmd-->
+
+# Randomised Complete Block Design (RCBD) 
+
+Aim: make it easy to do standard analysis of standard experimental designs used in field trials
+Assumptions: you know some basic R, have R and RStudio already installed on your compuiter and you are familiar with the standard analyses of field trials.  
+This document will focus initially on the simple analysis of an RCBD trial using R. Section 1 provides the steps used to produce the analysis; Section 2 provides some commentary on how these commands work, what output is created, and why these commands were chosen; Section 3 deals with aspects of the statistical methodology. 
+
+##About the data
+
+The data used in this example is from a study was conducted in Eastern Zambia and the main aim was to improve on the efficiency of the natural fallows by using appropriate trees that may have relevance in soil fertility regeneration within permissible fallow periods.
+
+The design was a randomized complete block design experiment with 4 blocks and 9 treatments was conducted. The primary outcome variable was crop yield (yield).
+
+The objective for this analysis is to study the impact of different fallow types on crop yields.
+
+The following steps were followed to generate the output in this document.
+The data was organized in excel rectangle columns with the different variables appearing in excel columns. All data checks were done in excel, meaningful data was selected and a copy of this data file was stored as a CSV file to make data import easy in R. The data file used in this analysis can be downloaded here: https://bit.ly/2rfLBEt 
+
+##Section 1: Steps in analysis using R
+1. Install R packages needed
+```{r, eval=FALSE}
+library(ggplot2)
+library(emmeans)
+library(doBy)
+library(lmerTest)
+library(multcompView)
+```
+2. Import data
+```{r, eval=FALSE}
+fallow <- read.csv("C:/Users/Admin/Desktop/Fallow N2.csv")
+```
+3. Check and update data
+```{r,eval=FALSE}
+summary(fallow)
+str(fallow)
+fallow$rep<-factor(fallow$rep)
+fallow$plot<-factor(fallow$plot)
+```
+4. Explore data
+```{r, eval=FALSE}
+ggplot(data=fallow,aes(y=yield,x=treat,col=rep))+geom_point()
+summaryBy(yield~treat, data=fallow, FUN=c(min,max,mean,median,sd))
+```
+
+5. Specify a model for data
+```{r, eval=FALSE}
+rcbdmodel1<-lmer(yield~treat+(1|rep),data=fallow)
+```
+
+6. Check the model
+```{r,eval=FALSE}
+plot(rcbdmodel1)
+
+qqnorm(resid(rcbdmodel1))
+qqline(resid(rcbdmodel1))
+```
+7. Interpret the model
+```{r, eval=FALSE}
+anova(rcbdmodel1,ddf="Kenward-Roger")
+print(VarCorr(rcbdmodel1), comp=("Variance"))
+```
+
+8. Present the results from the model
+```{r, eval=FALSE}
+emmip(rcbdmodel1,~treat,CIs = TRUE)
+emmeans(rcbdmodel1, ~treat)
+cld(emmeans(rcbdmodel1, ~treat))
+```
+
+##Section 2: Explanation of Steps
+###1.	Install R packages needed 
+
+A number of packages following packages were used during data exploration and analysis. For a general introduction explaining what R packages are and how they work, this is a really useful guide https://www.datacamp.com/community/tutorials/r-packages-guide. 
+For each of these packages to be installed, using install.packages(), this requires a reliable internet connection and a correctly installed version of R and RStudio. If you are having difficulties installing these packages please ask for help.
+
+```{r,eval=FALSE}
+install.packages("ggplot2")
+library(ggplot2)
+```
+```ggplot2``` This package provides a powerful graphics language for creating elegant and complex graphs in R.
+```{r,eval=FALSE}
+install.packages("emmeans")
+library(emmeans)
+```
+```emmeans``` Estimated marginal means (also known as least squares means) helps provide expected mean values and confidence intervals from statistical models.
+```{r,eval=FALSE}
+install.packages("doBy")
+library(doBy)
+```
+```doBy```Allows easy production of summary statistic tables
+```{r,eval=FALSE}
+install.packages("lmerTest")
+library(lmerTest)
+```
+```lmerTest``` Allows produce of flexible mixed effects regression models, similar to REML in Genstat.
+
+```{r,eval=FALSE}
+install.packages("multcompView")
+library(multcompView)
+```
+```multcompView``` allows for mean seperation methods on analyses
+
+```{r,include=FALSE,echo=FALSE}
+
+library(ggplot2)
+library(emmeans)
+library(doBy)
+library(lmerTest)
+library(multcompView)
+```
+
+###2.	Import data
+
+Our data set saved as a CSV file, so we can use the read.csv commmand to import the data. We are going to assign the name of the data with R to be ```fallow2```. Remember in R Studio you could also use the "Import Dataset" menu to import a dataset. 
+
+```{r,eval=FALSE}
+fallow <- read.csv("C:/Users/Admin/Desktop/Fallow N2.csv")
+```
+
+```{r,echo=FALSE}
+fallow <- read.csv("Fallow N2.csv")
+```
+
+
+
+###3.	Check and update data
+
+
+```{r}
+DT::datatable(fallow)
+```
+
+
+When reading data into R it is always useful to check that data is in the format expected. How many variables are there? How many rows? How have the columns been read in? The summary command can help to show if the data is being treated correctly.
+
+```{r}
+summary(fallow)
+```
+
+Where data is being treated as a numeric variable (i.e. a number) ```summary``` provides statistics like the mean, min and max. Where data is being treated like a categorical variable (i.e. a group) then summary provides frequency tables.
+
+
+From the results we can see that the variables rep and plot are being considered as numeric variables. However these are grouping variables, not number variables, the numbers used are simply codes. If we do not rectify this then our analysis later will be incorrect and meaningless.  
+This can also be seen more explicitly using the str() function.
+
+```{r}
+str(fallow)
+```
+
+So we need to convert these variables into factors. 
+
+```{r}
+fallow$rep<-factor(fallow$rep)
+fallow$plot<-factor(fallow$plot)
+```
+
+These commands take the column rep within the data frame fallow, converts into a factor and saves the result in a column called rep within fallow.
+
+###4.	Explore data
+
+####Plots
+
+With this code we want to summarize data fallow by yield as the response and treatment as a factor using points.
+
+```{r}
+ggplot(data=fallow,aes(y=yield,x=treat))+geom_point()
+```
+We could also extend this to identify which points came from which reps.
+
+```{r}
+ggplot(data=fallow,aes(y=yield,x=treat,col=rep))+geom_point()
+```
+Using ggplot2 we can easily change between different types of graph with small changes to the code. Boxplots are very useful if we have lots of data in each group, but in this example we only have 4 points so it is easy to visualise all of our data using a scatter plot. But the only change we would need to make to our original code is to change geom_point() to geom_boxplot().
+
+```{r}
+ggplot(data=fallow,aes(y=yield,x=treat))+geom_boxplot()
+```
+
+From the figures produced we can see that treatment 1 has consistently high yields. The lowest yield recorded for treatment 1 is higher than the highest yield recorded for any of the other treatments. Treatments 5 and 8 had consistently low yields.
+
+
+####Summary Statistics
+
+To produce summary statistics, by group, there are many options within R. One option is to use the summaryBy function, from the doBy library. The code used for this is quite similar to the code we will use to produce models in a later step.
+
+```{r}
+summaryBy(yield~treat, data=fallow, FUN=mean)
+```
+
+We can also calculate multiple statistics in the same line of code
+
+```{r}
+summaryBy(yield~treat, data=fallow, FUN=c(min,max,mean,median,sd))
+```
+
+
+###5. Specify a model for data
+
+
+In this design, an RCBD, we have one treatment factor, "treat", and one layout factor "rep". More information about model fitting can be found in section 2.
+
+```{r}
+rcbdmodel1<-lmer(yield~treat+(1|rep),data=fallow)
+```
+
+
+R is unlike many other software packages in how it fits models. The best way of handling models in R is to assign the model to a name (in this case rcbdmodel1) and then ask R to provide different sorts of output for this model. When you run the above line you will get now output from the data - this is what we expected to see!
+
+###6. Check the model
+
+Before interpretting the model any further we should investigate the model validity, to ensure any conclusions we draw are valid. There are 3 assumptions that we can check for using standard model checking plots.
+1. Homogeneity (equal variance)
+2. Values with high leverage
+3. Normality of residuals
+
+The function plot() when used with a model will plot the fitted values from the model against the expected values.
+
+
+```{r}
+plot(rcbdmodel1)
+```
+The residual Vs fitted plot is a scatter plot of the Residuals on the y-axis and the fitted on the x-axis and the aim for this plot is to test the assumption of equal variance of the residuals across the range of fitted values. Since the residuals do not funnel out (to form triangular/diamond shape) the assumption of equal variance is met. 
+
+We can also see that there are no extreme values in the residuals which might be potentially causing problems with the validity of our conclusions (leverage)
+
+To assess the assumption of normality we can produce a qqplot. This shows us how closely the residuals follow a normal distribution - if there are severe and syste,matic deviations from the line then we may want to consider an alternative distribution.
+
+```{r}
+qqnorm(resid(rcbdmodel1))
+qqline(resid(rcbdmodel1))
+```
+In this case the residuals seem to fit the assumption required for normality.
+
+###7. Interpret Model
+
+The anova() function only prints the rows of analysis of variance table for treatment effects when looking at a mixed model fitted using lmer().
+
+```{r}
+anova(rcbdmodel1,ddf="Kenward-Roger")
+```
+
+ddf=Kenward-Roger tells R which method to use for determining the calculations of the table; this option matches the defaults found within SAS or Genstat. The ANOVA table suggests a highly significant effect of the treatment on the yield.
+
+To obtain the residual variance, and the variance attributed to the blocks we need an additional command. From these number it is possible to reconstruct a more classic ANOVA table, if so desired.
+```{r}
+print(VarCorr(rcbdmodel1), comp=("Variance"))
+```
+
+###8. Present the results from the model
+
+To help understand what the significant result from the ANOVA table means we can produce several plots and tables to help us. First we can use the function emmip() to produce plots of the modelled results, including 95% confidence intervals.
+
+```{r}
+emmip(rcbdmodel1,~treat,CIs = TRUE)
+```
+
+
+To obtain the numbers used in creating this graph we can use the function emmeans.
+```{r}
+emmeans(rcbdmodel1, ~treat)
+```
+
+And one method for conducting mean separation analysis we can use the function cld().
+
+```{r}
+cld(emmeans(rcbdmodel1, ~treat))
+```
+
+In the output, groups sharing a letter in the .group are not statistically different from each other.
+
+
+##Section 3 – Methodological Principles
+
+There are always many different ways of doing all that we have done here in R. The less complex the method/code is, the better it is for you so that you can easily grasp the method.
+
+For instance, we have fitted our model as a linear mixed effect model rather than traditional ANOVA because lmer model has the following advantages: 
+
+1.	They are very flexible especially where we have repeated measures, for instance you don’t need to have the same number of observations per subject/treatment.
+2.	Ability to account for a series of random effects. Not only are farms/farmers/plots…. different from each other, but things with in farms/plots….. also differ . Not taking these sources of variation into account will lead to underestimations of accuracy.
+3.	Allows for generalization of non-normal data.  
+4.	Handling missing data: If the percentage of missing data is small and that data missing is a random sample of the data set,data from the observations with missing data can be analysed with lmer (unlike other packages that would do listwise deletion.
+5.	Takes into account variation that is explained by the predictor variables of interest ie fixed effects and variation that is not explained by these predictors ie random effects.
+
+Not forgetting that selecting variables to include in our model generally depends on theory, statistics and practical knowledge the following (general) rules will be considered while fitting our models:
+
+i)	Consider the Treatments (A, B,….) as fixed effects  and hence presented as A*B in our model.
+ii)	Consider the layout factors as random effects and hence presented as (1|block/plot…) in our model.
+Generally, our model is in the form of Model<-lmer(Response~ (1|Block/Plot)+Treatment A + Treatment B…, data=Dataframe)
+
+In this example using the fallow data, note that if we had a "completely randomised" design rather than a "blocked randomised design", where each treatment was replicated 4 times but there were not blocks, this is a rare example of a design which cannot be handled by lmer. In this case there would be no random effects, so the function needed would be lm() rather than lmer().
+
+Food for thought: Your best model will certainly be as good as the data you collected!!! 
+
+<!--chapter:end:02-RCBD.Rmd-->
+
+#Split Plot Designs
+Aim: make it easy to do standard analysis of standard experimental designs used in field trials
+Assumptions: you know some basic R, have R and RStudio already installed on your compuiter and you are familiar with the standard analyses of field trials.  
+This document will focus initially on the simple analysis of a split plot design trial using R. Section 1 provides the steps used to produce the analysis; Section 2 provides some commentary on how these commands work, what output is created, and why these commadns were chosen; Section 3 deals with aspects of the statistical methodology. 
+
+It would be beneficial to also read through Part 1 in this series, analysis of RCBD single factor experiments. You may notice many similarities in the R syntax used in these guides.
+
+##About the data
+
+The data for this example involves a split plot designed experiment. Treatments are 4 cropping patterns, and two nitrogen levels. The design is a split Both N and P could limit maize growth in the –N subplots, whereas N will not limit maize growth in the +N subplots. The comparison of +N and –N subplots within a mainplot will assess whether the fallows have eliminated N deficiency for maize.
+
+Differences in maize yield among treatments for the +N subplot will result from differences in P plus “fallow benefits” to maize. Differences in maize yield among treatments for the -N subplot will result from differences in N plus P plus “fallow benefits” to maize.
+
+
+The following steps were followed to generate the output in this document.
+The data was organized in excel rectangle columns with the different variables appearing in excel columns. All data checks were done in excel, meaningful data was selected and a copy of this data file was stored as a CSV file to make data import easy in R. The data file used in this analysis can be downloaded here: https://bit.ly/2rfLBEt 
+
+##Section 1: Steps in analysis using R
+1. Install R packages needed
+```{r, eval=FALSE}
+library(ggplot2)
+library(emmeans)
+library(doBy)
+library(lmerTest)
+library(multcompView)
+```
+2. Import data
+```{r, eval=FALSE}
+fphosphorus  <- read.csv("C:/Users/Admin/Desktop/FPhosphorus.csv")
+```
+3. Check and update data
+```{r,eval=FALSE}
+summary(fphosphorus)
+str(fphosphorus)
+
+fphosphorus$mainplot<-factor(fphosphorus$mainplot)
+fphosphorus$subplot<-factor(fphosphorus$subplot)
+fphosphorus$block<-factor(fphosphorus$block)
+```
+4. Explore data
+```{r, eval=FALSE}
+ggplot(data=fphosphorus,aes(y=grain,x=fallow))+geom_boxplot(aes(colour=nitrogen))
+summaryBy(grain~fallow+nitrogen, data=fphosphorus, FUN=c(mean,sd))
+```
+
+5. Specify a model for data
+```{r, eval=FALSE}
+splitplotmodel1<-lmer(grain~fallow*nitrogen+(1|block/mainplot), data=fphosphorus)
+```
+
+6. Check the model
+```{r,eval=FALSE}
+plot(splitplotmodel1)
+
+qqnorm(resid(splitplotmodel1))
+qqline(resid(splitplotmodel1))
+
+splitplotmodel2<-lmer(sqrt(grain)~fallow*nitrogen+(1|block/mainplot), data=fphosphorus)
+
+plot(splitplotmodel2)
+
+qqnorm(resid(splitplotmodel2))
+qqline(resid(splitplotmodel2))
+```
+7. Interpret the model
+```{r, eval=FALSE}
+anova(splitplotmodel2, ddf="Kenward-Roger")
+print(VarCorr(splitplotmodel2), comp=("Variance"))
+```
+
+8. Present the results from the model
+```{r, eval=FALSE}
+emmip(splitplotmodel2,nitrogen~fallow,CIs = TRUE,type="response")
+emmeans(splitplotmodel2,~fallow,type="response")
+cld(emmeans(splitplotmodel2,~fallow,type="response"))
+```
+
+##Section 2: Explanation of Steps
+###1.	Install R packages needed 
+
+A number of packages following packages were used during data exploration and analysis. For a general introduction explaining what R packages are and how they work, this is a really useful guide https://www.datacamp.com/community/tutorials/r-packages-guide. 
+For each of these packages to be installed, using install.packages(), this requires a reliable internet connection and a correctly installed version of R and RStudio. If you are having difficulties installing these packages please ask for help.
+
+```{r,eval=FALSE}
+install.packages("ggplot2")
+library(ggplot2)
+```
+```ggplot2``` This package provides a powerful graphics language for creating elegant and complex graphs in R.
+```{r,eval=FALSE}
+install.packages("emmeans")
+library(emmeans)
+```
+```emmeans``` Estimated marginal means (also known as least squares means) helps provide expected mean values and confidence intervals from statistical models.
+```{r,eval=FALSE}
+install.packages("doBy")
+library(doBy)
+```
+```doBy```Allows easy production of summary statistic tables
+```{r,eval=FALSE}
+install.packages("lmerTest")
+library(lmerTest)
+```
+```lmerTest``` Allows produce of flexible mixed effects regression models, similar to REML in Genstat.
+
+```{r,eval=FALSE}
+install.packages("multcompView")
+library(multcompView)
+```
+```multcompView``` allows for mean seperation methods on analyses
+
+```{r,include=FALSE,echo=FALSE}
+
+library(ggplot2)
+library(emmeans)
+library(doBy)
+library(lmerTest)
+library(multcompView)
+```
+
+###2.	Import data
+
+Our data set saved as a CSV file, so we can use the read.csv commmand to import the data. We are going to assign the name of the data with R to be ```fphosphorus```. Remember in R Studio you could also use the "Import Dataset" menu to import a dataset. 
+
+```{r,eval=FALSE}
+fphosphorus  <- read.csv("C:/Users/Admin/Desktop/FPhosphorus.csv")
+```
+
+```{r,echo=FALSE}
+fphosphorus  <- read.csv("FPhosphorus.csv")
+```
+
+
+###3.	Check and update data
+
+When reading data into R it is always useful to check that data is in the format expected. How many variables are there? How many rows? How have the columns been read in? The summary command can help to show if the data is being treated correctly.
+
+```{r}
+summary(fphosphorus)
+```
+
+Where data is being treated as a numeric variable (i.e. a number) ```summary``` provides statistics like the mean, min and max. Where data is being treated like a categorical variable (i.e. a group) then summary provides frequency tables.
+
+
+From the results we can see that the variables block, mainplor and subplot are being considered as numeric variables. However these are grouping variables, not number variables, the numbers used are simply codes. If we do not rectify this then our analysis later will be incorrect and meaningless.  
+This can also be seen more explicitly using the str() function.
+
+```{r}
+str(fphosphorus)
+```
+
+So we need to convert these variables into factors. 
+
+```{r}
+fphosphorus$block<-factor(fphosphorus$block)
+fphosphorus$mainplot<-factor(fphosphorus$mainplot)
+fphosphorus$subplot<-factor(fphosphorus$subplot)
+```
+
+These commands take the column block within the data frame fphosphorus, converts into a factor and saves the result in a column called block within fphosphorus
+
+###4.	Explore data
+
+###Plots
+
+In Tutorial 1 we produced plots showing all of the data plotted as points, like this:
+
+```{r}
+ggplot(data=fphosphorus,aes(y=grain,x=fallow,colour=nitrogen))+geom_point()
+```
+But in this instance there are too many points to be able to fully understand how the results are distributed. In this case we would get better information through looking at some boxplots.
+
+```{r}
+ggplot(data=fphosphorus,aes(y=grain,x=fallow,colour=nitrogen))+geom_boxplot()
+```
+
+
+
+###Summary Statistics
+
+Using the summaryBy() function makes it easy to split summary statsitics into groups based on more than one factor. So the combination of fallow treatment and nitrogen treatment can be obtained using a + sign between the two variables.
+
+```{r}
+summaryBy(grain~fallow+nitrogen, data=fphosphorus, FUN=c(mean,sd))
+```
+
+###5. Specify a model for data
+
+
+In this design, a split plot desin, we have two treatment factors, "fallow" and "nitrogen", and two layout factors "block" and "mainplot". 
+
+In order to test the "main effects" of the treatmetns as well as the interaction between the two factors, then we need to make sure the formula is specified as factor1*factor2. Using factor1+factor2 will only include the main effects and not include the interaction.
+
+When dealing with the split plot design, across multiple blocks, then the random effects need to be nested hierachically, from biggest down to smallest. This is done with a random effect that includes a / and looks like (1|biggestlayoutunit/nextbiggestlayout unit).
+
+So the model we want to fit therefore looks like:
+```{r}
+splitplotmodel1<-lmer(grain~fallow*nitrogen+(1|block/mainplot), data=fphosphorus)
+```
+
+
+R is unlike many other software packages in how it fits models. The best way of handling models in R is to assign the model to a name (in this case rcbdmodel1) and then ask R to provide different sorts of output for this model. When you run the above line you will get now output from the data - this is what we expected to see!
+
+###6. Check the model
+
+Before interpretting the model any further we should investigate the model validity, to ensure any conclusions we draw are valid. There are 3 assumptions that we can check for using standard model checking plots.
+1. Homogeneity (equal variance)
+2. Values with high leverage
+3. Normality of residuals
+
+The function plot() when used with a model will plot the fitted values from the model against the expected values.
+
+
+```{r}
+plot(splitplotmodel1)
+```
+The residual Vs fitted plot is a scatter plot of the Residuals on the y-axis and the fitted on the x-axis and the aim for this plot is to test the assumption of equal variance of the residuals across the range of fitted values. There is someevidence of non-constant variance in our plot - residual values are less varaable around lower fitted values, and more variable around higher fitted values. This issue can often be solved by using a logaithmic or square root transformation. In this case, because there are some zero values within our data, it may be better to use a square root transformation.
+
+```{r}
+splitplotmodel2<-lmer(sqrt(grain)~fallow*nitrogen+(1|block/mainplot), data=fphosphorus)
+```
+Refitting the plot shows a better approximation of heterogeneity, that is more acceptable to the assumptions required.
+```{r}
+plot(splitplotmodel2)
+```
+We can also see that there are no extreme values in the residuals which might be potentially causing problems with the validity of our conclusions (leverage)
+
+To assess the assumption of normality we can produce a qqplot. This shows us how closely the residuals follow a normal distribution - if there are severe and syste,matic deviations from the line then we may want to consider an alternative distribution.
+
+```{r}
+qqnorm(resid(splitplotmodel2))
+qqline(resid(splitplotmodel2))
+```
+In this case the residuals seem to fit the assumption required for normality.
+
+
+
+
+
+###7. Interpret Model
+
+The anova() function only prints the rows of analysis of variance table for treatment effects when looking at a mixed model fitted using lmer().
+
+```{r}
+anova(splitplotmodel2,ddf="Kenward-Roger")
+```
+
+ddf=Kenward-Roger tells R which method to use for determining the calculations of the table; this option matches the defaults found within SAS or Genstat. The ANOVA table suggests a highly significant effect of the treatment on the yield.
+
+To obtain the residual variance, and the variance attributed to the blocks we need an additional command. From these number it is possible to reconstruct a more classic ANOVA table, if so desired.
+```{r}
+print(VarCorr(splitplotmodel1), comp=("Variance"))
+```
+
+###8. Present the results from the model
+
+To help understand what the significant result from the ANOVA table means we can produce several plots and tables to help us. First we can use the function emmip() to produce plots of the modelled results, including 95% confidence intervals.
+
+```{r}
+emmip(splitplotmodel2,nitrogen~fallow,CIs = TRUE,type = "response")
+
+```
+
+
+To obtain the numbers used in creating this graph we can use the function emmeans.
+```{r}
+emmeans(splitplotmodel1, ~fallow)
+```
+
+And one method for conducting mean separation analysis we can use the function cld().
+
+```{r}
+cld(emmeans(splitplotmodel1, ~fallow))
+```
+
+In the output, groups sharing a letter in the .group are not statistically different from each other.
+
+
+##Section 3 – Methodological Principles
+
+There are always many different ways of doing all that we have done here in R. The less complex the method/code is, the better it is for you so that you can easily grasp the method.
+
+In this example using the phosphurus data, we have a split plot design. This means that a single plot where the fallow treatment has been applied is split into 2, and each half receives a different nitrogen treatment. It is useful to have seperate columns denoting treamtent factors and layout factors - even if these may be somewhat replicating the same information.  The split plots are nested within the plots, which are nested within the blocks. So the random effect needs to incorporate this nesting. Remember that the lowest level design factor, the split plot, does not get included in the model. This is similar to the RCBD analysis, where the lowest level factor - plot, does not get included in the model.
+
+Note that the difference in the specification of random effects in the model is effectively the only difference needed in the R syntax used to produce this analysis, as compared to Tutorial 1, the RCBD. All other syntax has been modified to reflect differences in the data collected, but the same functions (ggplot, summaryBy, emmeans) are being applied in the same way.
+
+
+Food for thought: Your best model will certainly be as good as the data you collected!!! 
+
+<!--chapter:end:03-splitplot.Rmd-->
+
+#Adjusting for Covariates
+
+##About the data
+
+
+
+The data used in this example is from a study was conducted in Eastern Zambia and the main aim was to improve on the efficiency of the natural fallows by using appropriate trees that may have relevance in soil fertility regeneration within permissible fallow periods. This is the same data used in the first part of this series.
+
+The design was a randomized complete block design experiment with 4 blocks and 9 treatments was conducted. The primary outcome variable was crop yield (yield). We also have data collected on striga infestation.
+
+The objective for this analysis is to investigate the relationship between striga infestation and yield across the different treatments.
+
+The following steps were followed to generate the output in this document.
+The data was organized in excel rectangle columns with the different variables appearing in excel columns. All data checks were done in excel, meaningful data was selected and a copy of this data file was stored as a CSV file to make data import easy in R. The data file used in this analysis can be downloaded here: https://bit.ly/2rfLBEt 
+
+##Section 1: Steps in analysis using R
+1. Install R packages needed
+```{r, eval=FALSE}
+library(ggplot2)
+library(emmeans)
+library(doBy)
+library(lmerTest)
+library(multcompView)
+```
+2. Import data
+```{r, eval=FALSE}
+fallow <- read.csv("C:/Users/Admin/Desktop/Fallow N2.csv")
+```
+3. Check and update data
+```{r,eval=FALSE}
+summary(fallow)
+str(fallow)
+fallow$rep<-factor(fallow$rep)
+fallow$plot<-factor(fallow$plot)
+```
+4. Explore data
+```{r, eval=FALSE}
+ggplot(data=fallow,aes(y=yield,x=treat,col=rep))+geom_point()
+summaryBy(yield~treat, data=fallow, FUN=c(min,max,mean,median,sd))
+```
+
+5. Specify a model for data
+```{r, eval=FALSE}
+rcbdmodel1<-lmer(yield~treat+(1|rep),data=fallow)
+```
+
+6. Check the model
+```{r,eval=FALSE}
+plot(rcbdmodel1)
+
+qqnorm(resid(rcbdmodel1))
+qqline(resid(rcbdmodel1))
+```
+7. Interpret the model
+```{r, eval=FALSE}
+anova(rcbdmodel1,ddf="Kenward-Roger")
+print(VarCorr(rcbdmodel1), comp=("Variance"))
+```
+
+8. Present the results from the model
+```{r, eval=FALSE}
+emmip(rcbdmodel1,~treat,CIs = TRUE)
+emmeans(rcbdmodel1, ~treat)
+cld(emmeans(rcbdmodel1, ~treat))
+```
+
+
+##Section 2: Explanation of Steps
+###1.	Install R packages needed 
+
+A number of packages following packages were used during data exploration and analysis. For a general introduction explaining what R packages are and how they work, this is a really useful guide https://www.datacamp.com/community/tutorials/r-packages-guide. 
+For each of these packages to be installed, using install.packages(), this requires a reliable internet connection and a correctly installed version of R and RStudio. If you are having difficulties installing these packages please ask for help.
+
+```{r,eval=FALSE}
+install.packages("ggplot2")
+library(ggplot2)
+```
+```ggplot2``` This package provides a powerful graphics language for creating elegant and complex graphs in R.
+```{r,eval=FALSE}
+install.packages("emmeans")
+library(emmeans)
+```
+```emmeans``` Estimated marginal means (also known as least squares means) helps provide expected mean values and confidence intervals from statistical models.
+```{r,eval=FALSE}
+install.packages("doBy")
+library(doBy)
+```
+```doBy```Allows easy production of summary statistic tables
+```{r,eval=FALSE}
+install.packages("lmerTest")
+library(lmerTest)
+```
+```lmerTest``` Allows produce of flexible mixed effects regression models, similar to REML in Genstat.
+
+```{r,eval=FALSE}
+install.packages("multcompView")
+library(multcompView)
+```
+```multcompView``` allows for mean seperation methods on analyses
+
+```{r,include=FALSE,echo=FALSE}
+
+library(multcompView)
+library(ggplot2)
+library(emmeans)
+library(doBy)
+library(lmerTest)
+library(multcompView)
+```
+
+###2.	Import data
+
+Our data set saved as a CSV file, so we can use the read.csv commmand to import the data. We are going to assign the name of the data with R to be ```fallow2```. Remember in R Studio you could also use the "Import Dataset" menu to import a dataset. 
+
+```{r,eval=FALSE}
+fallow <- read.csv("C:/Users/Admin/Desktop/Fallow N2.csv")
+```
+
+```{r,echo=FALSE}
+fallow <- read.csv("Fallow N2.csv")
+```
+
+
+###3.	Check and update data
+
+When reading data into R it is always useful to check that data is in the format expected. How many variables are there? How many rows? How have the columns been read in? The summary command can help to show if the data is being treated correctly.
+
+```{r}
+summary(fallow)
+```
+
+Where data is being treated as a numeric variable (i.e. a number) ```summary``` provides statistics like the mean, min and max. Where data is being treated like a categorical variable (i.e. a group) then summary provides frequency tables.
+
+
+From the results we can see that the variables rep and plot are being considered as numeric variables. However these are grouping variables, not number variables, the numbers used are simply codes. If we do not rectify this then our analysis later will be incorrect and meaningless.  
+This can also be seen more explicitly using the str() function.
+
+```{r}
+str(fallow)
+```
+
+So we need to convert these variables into factors. 
+
+```{r}
+fallow$rep<-factor(fallow$rep)
+fallow$plot<-factor(fallow$plot)
+```
+
+These commands take the column rep within the data frame fallow, converts into a factor and saves the result in a column called rep within fallow.
+
+###4.	Explore data
+
+####Plots
+
+We are now interesting in assessing the relationship between yield and striga - so we want to produce a plot of striga against yield, with different coloured points denoting each treatment.
+
+```{r}
+ggplot(data=fallow,aes(y=yield,x=striga,col=treat))+geom_point()
+```
+We can see from the distribution of striga that there are some farms with very high levels of striga, and some farms with no striga. The big range of values makes it hard to make interpretations from this plot, so taking a square root transformation may help to visualise the relationship. A log transformation will not help here because of the large number of 0 values of striga.
+
+```{r}
+ggplot(data=fallow,aes(y=yield,x=sqrt(striga),col=treat))+geom_point()
+```
+
+```{r}
+ggplot(data=fallow,aes(y=yield,x=sqrt(striga)))+geom_point(aes(col=treat))+geom_smooth(method="lm")
+```
+####Summary Statistics
+
+To produce summary statistics, by group, there are many options within R. One option is to use the summaryBy function, from the doBy library. The code used for this is quite similar to the code we will use to produce models in a later step.
+
+```{r}
+summaryBy(yield~treat, data=fallow, FUN=mean)
+```
+
+We can also calculate multiple statistics in the same line of code
+
+```{r}
+summaryBy(yield+striga~treat, data=fallow, FUN=c(mean,median,sd))
+```
+
+
+###5. Specify a model for data
+
+
+In this design, an RCBD, we have one treatment factor, "treat", and one layout factor "rep". More information about model fitting can be found in section 2.
+
+```{r}
+rcbdmodel2<-lmer(yield~treat+sqrt(striga)+(1|rep),data=fallow)
+
+```
+
+
+R is unlike many other software packages in how it fits models. The best way of handling models in R is to assign the model to a name (in this case rcbdmodel1) and then ask R to provide different sorts of output for this model. When you run the above line you will get now output from the data - this is what we expected to see!
+
+###6. Check the model
+
+Before interpretting the model any further we should investigate the model validity, to ensure any conclusions we draw are valid. There are 3 assumptions that we can check for using standard model checking plots.
+1. Homogeneity (equal variance)
+2. Values with high leverage
+3. Normality of residuals
+
+The function plot() when used with a model will plot the fitted values from the model against the expected values.
+
+
+```{r}
+plot(rcbdmodel2)
+```
+The residual Vs fitted plot is a scatter plot of the Residuals on the y-axis and the fitted on the x-axis and the aim for this plot is to test the assumption of equal variance of the residuals across the range of fitted values. Since the residuals do not funnel out (to form triangular/diamond shape) the assumption of equal variance is met. 
+
+We can also see that there are no extreme values in the residuals which might be potentially causing problems with the validity of our conclusions (leverage)
+
+To assess the assumption of normality we can produce a qqplot. This shows us how closely the residuals follow a normal distribution - if there are severe and syste,matic deviations from the line then we may want to consider an alternative distribution.
+
+```{r}
+qqnorm(resid(rcbdmodel2))
+qqline(resid(rcbdmodel2))
+```
+In this case the residuals seem to fit the assumption required for normality.
+
+###7. Interpret Model
+
+The anova() function only prints the rows of analysis of variance table for treatment effects when looking at a mixed model fitted using lmer().
+
+```{r}
+anova(rcbdmodel2,ddf="Kenward-Roger")
+```
+
+ddf=Kenward-Roger tells R which method to use for determining the calculations of the table; this option matches the defaults found within SAS or Genstat. The ANOVA table suggests a highly significant effect of the treatment on the yield.
+
+To obtain the residual variance, and the variance attributed to the blocks we need an additional command. From these number it is possible to reconstruct a more classic ANOVA table, if so desired.
+```{r}
+print(VarCorr(rcbdmodel2), comp=("Variance"))
+```
+
+###8. Present the results from the model
+
+To help understand what the significant result from the ANOVA table means we can produce several plots and tables to help us. First we can use the function emmip() to produce plots of the modelled results, including 95% confidence intervals.
+
+```{r}
+emmip(rcbdmodel2,striga~treat,var="striga",CIs = TRUE, at = list(striga = c(0, 10,100,1000)))
+
+```
+
+Or alternatively
+```{r}
+emmip(rcbdmodel2,treat~striga,var="striga",at = list(striga = seq(0,1000,by=100)))
+
+```
+
+
+To obtain the numbers used in creating this graph we can use the function emmeans.
+```{r}
+emmeans(rcbdmodel2,~treat*striga,var="striga",at = list(striga = c(0, 10,100,1000)))
+
+```
+
+And one method for conducting mean separation analysis, holding striga effect constant, we can use the function cld().
+
+```{r}
+cld(emmeans(rcbdmodel2, ~treat))
+```
+
+In the output, groups sharing a letter in the .group are not statistically different from each other.
+
+
+##Section 3 – Methodological Principles
+
+When adjusting for covariates it is important to consider if the covariate being included is something that could be affected by the treatment variables, or whether it is something which affects the outcome independent of the treatments. If we were confident that striga infestation was not impacted by the choice of treatment then in this analysis 
+
+<!--chapter:end:04-covariates.Rmd-->
+
+#Relay Planting Example
+
+##Section 1: Steps in analysis using R
+1. Install R packages needed
+```{r, eval=FALSE}
+library(ggplot2)
+library(emmeans)
+library(doBy)
+library(lmerTest)
+library(multcompView)
+```
+2. Import data
+```{r, eval=FALSE}
+relay <- read.csv("C:/Users/Admin/Desktop/RelayP.csv")
+```
+3. Check and update data
+```{r,eval=FALSE}
+summary(relay)
+str(relay)
+relay$fert<-factor(relay$fert)
+
+```
+4. Explore data
+```{r, eval=FALSE}
+ggplot(data=relay,aes(y=grain,x=fert))+geom_boxplot(aes(colour=plantime))
+
+ggplot(data=relay,aes(y=grain,x=plantime))+geom_boxplot(aes(colour=fert))
+
+summaryBy(grain~fert+plantime, data=relay, FUN=c(mean,median,sd))
+```
+
+5. Specify a model for data
+```{r, eval=FALSE}
+relaymodel<-lmer(grain~plantime*fert+(1|rep), data=RelayP)
+```
+
+6. Check the model
+```{r,eval=FALSE}
+plot(relaymodel)
+
+qqnorm(resid(relaymodel))
+qqline(resid(relaymodel))
+```
+7. Interpret the model
+```{r, eval=FALSE}
+anova(relaymodel, ddf="Kenward-Roger")
+print(VarCorr(relaymodel), comp=("Variance"))
+
+```
+
+8. Present the results from the model
+```{r, eval=FALSE}
+emmip(relaymodel,fert~plantime,CIs = TRUE)
+emmip(relaymodel,~fert,CIs = TRUE)
+emmip(relaymodel,~plantime,CIs = TRUE)
+emmeans(relaymodel, ~fert*plantime)
+```
+
+
+##Section 2: Explanation of Steps
+###1.	Install R packages needed 
+
+A number of packages following packages were used during data exploration and analysis. For a general introduction explaining what R packages are and how they work, this is a really useful guide https://www.datacamp.com/community/tutorials/r-packages-guide. 
+For each of these packages to be installed, using install.packages(), this requires a reliable internet connection and a correctly installed version of R and RStudio. If you are having difficulties installing these packages please ask for help.
+
+```{r,eval=FALSE}
+install.packages("ggplot2")
+library(ggplot2)
+```
+```ggplot2``` This package provides a powerful graphics language for creating elegant and complex graphs in R.
+```{r,eval=FALSE}
+install.packages("emmeans")
+library(emmeans)
+```
+```emmeans``` Estimated marginal means (also known as least squares means) helps provide expected mean values and confidence intervals from statistical models.
+```{r,eval=FALSE}
+install.packages("doBy")
+library(doBy)
+```
+```doBy```Allows easy production of summary statistic tables
+```{r,eval=FALSE}
+install.packages("lmerTest")
+library(lmerTest)
+```
+```lmerTest``` Allows produce of flexible mixed effects regression models, similar to REML in Genstat.
+
+```{r,eval=FALSE}
+install.packages("multcompView")
+library(multcompView)
+```
+```multcompView``` allows for mean seperation methods on analyses
+
+```{r,include=FALSE,echo=FALSE}
+
+library(multcompView)
+library(ggplot2)
+library(emmeans)
+library(doBy)
+library(lmerTest)
+library(multcompView)
+```
+
+###2.	Import data
+
+Our data set saved as a CSV file, so we can use the read.csv commmand to import the data. We are going to assign the name of the data with R to be ```fallow2```. Remember in R Studio you could also use the "Import Dataset" menu to import a dataset. 
+
+```{r,eval=FALSE}
+relay <- read.csv("C:/Users/Admin/Desktop/RelayP.csv")
+```
+
+```{r,echo=FALSE}
+relay <- read.csv("RelayP.csv")
+```
+
+
+###3.	Check and update data
+
+When reading data into R it is always useful to check that data is in the format expected. How many variables are there? How many rows? How have the columns been read in? The summary command can help to show if the data is being treated correctly.
+
+```{r}
+summary(relay)
+
+
+```
+
+Where data is being treated as a numeric variable (i.e. a number) ```summary``` provides statistics like the mean, min and max. Where data is being treated like a categorical variable (i.e. a group) then summary provides frequency tables.
+
+
+From the results we can see that the variables rep and plot are being considered as numeric variables. However these are grouping variables, not number variables, the numbers used are simply codes. If we do not rectify this then our analysis later will be incorrect and meaningless.  
+This can also be seen more explicitly using the str() function.
+
+```{r}
+str(relay)
+```
+
+So we need to convert these variables into factors. 
+
+```{r}
+relay$fert<-factor(relay$fert)
+```
+
+These commands take the column rep within the data frame fallow, converts into a factor and saves the result in a column called rep within fallow.
+
+###4.	Explore data
+
+####Plots
+
+We are now interesting in assessing the relationship between yield and striga - so we want to produce a plot of striga against yield, with different coloured points denoting each treatment.
+
+```{r}
+ggplot(data=relay,aes(y=grain,x=fert))+geom_boxplot(aes(colour=plantime))
+
+
+```
+We can see from the distribution of striga that there are some farms with very high levels of striga, and some farms with no striga. The big range of values makes it hard to make interpretations from this plot, so taking a square root transformation may help to visualise the relationship. A log transformation will not help here because of the large number of 0 values of striga.
+
+```{r}
+ggplot(data=relay,aes(y=grain,x=plantime))+geom_boxplot(aes(colour=fert))
+
+
+```
+
+####Summary Statistics
+
+To produce summary statistics, by group, there are many options within R. One option is to use the summaryBy function, from the doBy library. The code used for this is quite similar to the code we will use to produce models in a later step.
+
+```{r}
+summaryBy(grain~fert+plantime, data=relay, FUN=c(mean,median,sd))
+```
+
+
+###5. Specify a model for data
+
+
+In this design, an RCBD, we have one treatment factor, "treat", and one layout factor "rep". More information about model fitting can be found in section 2.
+
+```{r}
+relaymodel<-lmer(grain~plantime*fert+(1|rep), data=relay)
+
+```
+
+
+R is unlike many other software packages in how it fits models. The best way of handling models in R is to assign the model to a name (in this case rcbdmodel1) and then ask R to provide different sorts of output for this model. When you run the above line you will get now output from the data - this is what we expected to see!
+
+###6. Check the model
+
+Before interpretting the model any further we should investigate the model validity, to ensure any conclusions we draw are valid. There are 3 assumptions that we can check for using standard model checking plots.
+1. Homogeneity (equal variance)
+2. Values with high leverage
+3. Normality of residuals
+
+The function plot() when used with a model will plot the fitted values from the model against the expected values.
+
+
+```{r}
+plot(relaymodel)
+```
+The residual Vs fitted plot is a scatter plot of the Residuals on the y-axis and the fitted on the x-axis and the aim for this plot is to test the assumption of equal variance of the residuals across the range of fitted values. Since the residuals do not funnel out (to form triangular/diamond shape) the assumption of equal variance is met. 
+
+We can also see that there are no extreme values in the residuals which might be potentially causing problems with the validity of our conclusions (leverage)
+
+To assess the assumption of normality we can produce a qqplot. This shows us how closely the residuals follow a normal distribution - if there are severe and syste,matic deviations from the line then we may want to consider an alternative distribution.
+
+```{r}
+qqnorm(resid(relaymodel))
+qqline(resid(relaymodel))
+```
+In this case the residuals seem to fit the assumption required for normality.
+
+###7. Interpret Model
+
+The anova() function only prints the rows of analysis of variance table for treatment effects when looking at a mixed model fitted using lmer().
+
+```{r}
+anova(relaymodel,ddf="Kenward-Roger")
+```
+
+ddf=Kenward-Roger tells R which method to use for determining the calculations of the table; this option matches the defaults found within SAS or Genstat. The ANOVA table suggests a highly significant effect of the treatment on the yield.
+
+To obtain the residual variance, and the variance attributed to the blocks we need an additional command. From these number it is possible to reconstruct a more classic ANOVA table, if so desired.
+```{r}
+print(VarCorr(relaymodel), comp=("Variance"))
+```
+
+###8. Present the results from the model
+
+To help understand what the significant result from the ANOVA table means we can produce several plots and tables to help us. First we can use the function emmip() to produce plots of the modelled results, including 95% confidence intervals.
+
+```{r}
+emmip(relaymodel,fert~plantime,CIs = TRUE)
+
+
+```
+
+Or alternatively
+```{r}
+emmip(relaymodel,~fert,CIs = TRUE)
+emmip(relaymodel,~plantime,CIs = TRUE)
+```
+
+
+To obtain the numbers used in creating this graph we can use the function emmeans.
+```{r}
+emmeans(relaymodel, ~fert*plantime)
+
+
+```
+
+And one method for conducting mean separation analysis, holding striga effect constant, we can use the function cld().
+
+```{r}
+cld(emmeans(relaymodel, ~fert))
+cld(emmeans(relaymodel, ~plantime))
+cld(emmeans(relaymodel, ~fert*plantime))
+```
+
+In the output, groups sharing a letter in the .group are not statistically different from each other.
+
+
+##Section 3 – Methodological Principles
+
+When adjusting for covariates it is important to consider if the covariate being included is something that could be affected by the treatment variables, or whether it is something which affects the outcome independent of the treatments. If we were confident that striga infestation was not impacted by the choice of treatment then in this analysis 
+
+<!--chapter:end:05-relayplanting.Rmd-->
+
+#Multi-Environment Trial Analysis
+
+##Section 1: Steps in analysis using R
+1. Install R packages needed
+```{r, eval=FALSE}
+library(ggplot2)
+library(emmeans)
+library(doBy)
+library(lmerTest)
+library(multcompView)
+```
+2. Import data
+```{r, eval=FALSE}
+vartrial <- read.csv("C:/Users/Admin/Desktop/mozvartrial.csv")
+```
+3. Check and update data
+```{r,eval=FALSE}
+summary(vartrial)
+str(vartrial)
+
+vartrial$variety<-factor(vartrial$variety)
+vartrial$trial<-factor(vartrial$trial)
+
+```
+4. Explore data
+```{r, eval=FALSE}
+ggplot(data=vartrial,aes(y=yield,x=varietyname)) +
+  geom_point(aes(colour=environment))
+
+ggplot(data=vartrial,aes(y=yield,x=environment,colour=varietyname,group=varietyname)) +
+  stat_summary(geom="line")
+
+ggplot(data=vartrial,aes(y=yield,x=varietyname))+
+  geom_boxplot(aes(colour=varietyname))+facet_wrap(~environment)
+
+
+summaryBy(yield~varietyname+environment, data=vartrial, FUN=c(mean,median,sd))
+```
+
+5. Specify a model for data
+```{r, eval=FALSE}
+gxemodel1<-lmer(yield~varietyname*environment+(1|rep:environment), data=vartrial)
+
+gxemodel2<-lmer(yield~varietyname*environment+(1|rep:environment)+(1|rep:environment:row)+(1|rep:environment:column), data=vartrial)
+
+anova(gxemodel2,gxemodel1)
+```
+
+6. Check the model
+```{r,eval=FALSE}
+plot(gxemodel2)
+
+qqnorm(resid(gxemodel2))
+qqline(resid(gxemodel2))
+```
+7. Interpret the model
+```{r, eval=FALSE}
+anova(gxemodel2, ddf="Kenward-Roger")
+print(VarCorr(gxemodel2), comp=("Variance"))
+
+ranova(gxemodel2)
+
+```
+
+8. Present the results from the model
+```{r, eval=FALSE}
+emmip(gxemodel2,~varietyname|environment,CIs = TRUE)
+
+emmip(gxemodel2,~varietyname|environment,CIs = TRUE)
+
+
+emmip(gxemodel2,varietyname~environment)+coord_flip()
+
+emmeans(gxemodel2, ~varietyname|environment)
+
+cld(emmeans(gxemodel2, ~varietyname|environment))
+
+estimatedmeans<-data.frame(cld(emmeans(gxemodel2, ~varietyname|environment)))
+estimatedmeans
+library(reshape2)
+dcast(varietyname~environment,value.var="emmean",data=estimatedmeans)
+
+```
+
+
+##Section 2: Explanation of Steps
+###1.	Install R packages needed 
+
+A number of packages following packages were used during data exploration and analysis. For a general introduction explaining what R packages are and how they work, this is a really useful guide https://www.datacamp.com/community/tutorials/r-packages-guide. 
+For each of these packages to be installed, using install.packages(), this requires a reliable internet connection and a correctly installed version of R and RStudio. If you are having difficulties installing these packages please ask for help.
+
+```{r,eval=FALSE}
+install.packages("ggplot2")
+library(ggplot2)
+```
+```ggplot2``` This package provides a powerful graphics language for creating elegant and complex graphs in R.
+```{r,eval=FALSE}
+install.packages("emmeans")
+library(emmeans)
+```
+```emmeans``` Estimated marginal means (also known as least squares means) helps provide expected mean values and confidence intervals from statistical models.
+```{r,eval=FALSE}
+install.packages("doBy")
+library(doBy)
+```
+```doBy```Allows easy production of summary statistic tables
+```{r,eval=FALSE}
+install.packages("lmerTest")
+library(lmerTest)
+```
+```lmerTest``` Allows produce of flexible mixed effects regression models, similar to REML in Genstat.
+
+```{r,eval=FALSE}
+install.packages("multcompView")
+library(multcompView)
+```
+```multcompView``` allows for mean seperation methods on analyses
+
+```{r,include=FALSE,echo=FALSE}
+
+library(multcompView)
+library(ggplot2)
+library(emmeans)
+library(doBy)
+library(lmerTest)
+library(multcompView)
+```
+
+###2.	Import data
+
+Our data set saved as a CSV file, so we can use the read.csv commmand to import the data. We are going to assign the name of the data with R to be ```fallow2```. Remember in R Studio you could also use the "Import Dataset" menu to import a dataset. 
+
+```{r,eval=FALSE}
+vartrial <- read.csv("C:/Users/Admin/Desktop/mozvartrial.csv")
+```
+
+```{r,echo=FALSE}
+vartrial <- read.csv("mozvartrial.csv")
+```
+
+
+###3.	Check and update data
+
+When reading data into R it is always useful to check that data is in the format expected. How many variables are there? How many rows? How have the columns been read in? The summary command can help to show if the data is being treated correctly.
+
+```{r}
+summary(vartrial)
+
+
+```
+
+Where data is being treated as a numeric variable (i.e. a number) ```summary``` provides statistics like the mean, min and max. Where data is being treated like a categorical variable (i.e. a group) then summary provides frequency tables.
+
+
+From the results we can see that the variables rep and plot are being considered as numeric variables. However these are grouping variables, not number variables, the numbers used are simply codes. If we do not rectify this then our analysis later will be incorrect and meaningless.  
+This can also be seen more explicitly using the str() function.
+
+```{r}
+str(vartrial)
+```
+
+So we need to convert these variables into factors. 
+
+```{r}
+vartrial$variety<-factor(vartrial$variety)
+vartrial$trial<-factor(vartrial$trial)
+```
+
+These commands take the column rep within the data frame fallow, converts into a factor and saves the result in a column called rep within fallow.
+
+###4.	Explore data
+
+####Plots
+
+We are now interesting in assessing the relationship between yield and striga - so we want to produce a plot of striga against yield, with different coloured points denoting each treatment.
+
+```{r}
+ggplot(data=vartrial,aes(y=yield,x=varietyname)) +
+  geom_point(aes(colour=environment))
+
+
+
+
+```
+We can see from the distribution of striga that there are some farms with very high levels of striga, and some farms with no striga. The big range of values makes it hard to make interpretations from this plot, so taking a square root transformation may help to visualise the relationship. A log transformation will not help here because of the large number of 0 values of striga.
+
+```{r}
+ggplot(data=vartrial,aes(y=yield,x=environment,colour=varietyname,group=varietyname)) +
+  stat_summary(geom="line")
+
+
+```
+
+
+```{r}
+ggplot(data=vartrial,aes(y=yield,x=varietyname))+
+  geom_boxplot(aes(colour=varietyname))+facet_wrap(~environment)
+```
+
+
+
+####Summary Statistics
+
+To produce summary statistics, by group, there are many options within R. One option is to use the summaryBy function, from the doBy library. The code used for this is quite similar to the code we will use to produce models in a later step.
+
+```{r}
+
+summaryBy(yield~varietyname+environment, data=vartrial, FUN=c(mean,median,sd))
+```
+
+
+###5. Specify a model for data
+
+
+In this design, an RCBD, we have one treatment factor, "treat", and one layout factor "rep". More information about model fitting can be found in section 2.
+
+```{r}
+gxemodel1<-lmer(yield~varietyname*environment+(1|rep:environment), data=vartrial)
+
+gxemodel2<-lmer(yield~varietyname*environment+(1|rep:environment)+(1|rep:environment:row)+(1|rep:environment:column), data=vartrial)
+
+anova(gxemodel2,gxemodel1)
+
+```
+
+
+R is unlike many other software packages in how it fits models. The best way of handling models in R is to assign the model to a name (in this case rcbdmodel1) and then ask R to provide different sorts of output for this model. When you run the above line you will get now output from the data - this is what we expected to see!
+
+###6. Check the model
+
+Before interpretting the model any further we should investigate the model validity, to ensure any conclusions we draw are valid. There are 3 assumptions that we can check for using standard model checking plots.
+1. Homogeneity (equal variance)
+2. Values with high leverage
+3. Normality of residuals
+
+The function plot() when used with a model will plot the fitted values from the model against the expected values.
+
+
+```{r}
+plot(gxemodel2)
+```
+The residual Vs fitted plot is a scatter plot of the Residuals on the y-axis and the fitted on the x-axis and the aim for this plot is to test the assumption of equal variance of the residuals across the range of fitted values. Since the residuals do not funnel out (to form triangular/diamond shape) the assumption of equal variance is met. 
+
+We can also see that there are no extreme values in the residuals which might be potentially causing problems with the validity of our conclusions (leverage)
+
+To assess the assumption of normality we can produce a qqplot. This shows us how closely the residuals follow a normal distribution - if there are severe and syste,matic deviations from the line then we may want to consider an alternative distribution.
+
+```{r}
+qqnorm(resid(gxemodel2))
+qqline(resid(gxemodel2))
+```
+In this case the residuals seem to fit the assumption required for normality.
+
+###7. Interpret Model
+
+The anova() function only prints the rows of analysis of variance table for treatment effects when looking at a mixed model fitted using lmer().
+
+```{r}
+anova(gxemodel2, ddf="Kenward-Roger")
+
+```
+
+ddf=Kenward-Roger tells R which method to use for determining the calculations of the table; this option matches the defaults found within SAS or Genstat. The ANOVA table suggests a highly significant effect of the treatment on the yield.
+
+To obtain the residual variance, and the variance attributed to the blocks we need an additional command. From these number it is possible to reconstruct a more classic ANOVA table, if so desired.
+```{r}
+print(VarCorr(gxemodel2), comp=("Variance"))
+
+ranova(gxemodel2)
+```
+
+###8. Present the results from the model
+
+To help understand what the significant result from the ANOVA table means we can produce several plots and tables to help us. First we can use the function emmip() to produce plots of the modelled results, including 95% confidence intervals.
+
+```{r}
+emmip(gxemodel2,~varietyname|environment,CIs = TRUE)
+
+
+
+
+```
+
+Or alternatively
+```{r}
+emmip(gxemodel2,~varietyname|environment,CIs = TRUE)
+
+
+emmip(gxemodel2,varietyname~environment)+coord_flip()
+
+
+```
+
+
+To obtain the numbers used in creating this graph we can use the function emmeans.
+```{r}
+emmeans(gxemodel2, ~varietyname|environment)
+
+
+
+```
+
+And one method for conducting mean separation analysis, holding striga effect constant, we can use the function cld().
+
+```{r}
+cld(emmeans(gxemodel2, ~varietyname*environment))
+
+cld(emmeans(gxemodel2, ~varietyname|environment))
+
+estimatedmeans<-data.frame(emmeans(gxemodel2, ~varietyname|environment))
+
+envmeans<-data.frame(emmeans(gxemodel2, ~environment))
+
+```
+
+In the output, groups sharing a letter in the .group are not statistically different from each other.
+
+
+##Section 3 – Methodological Principles
+
+When adjusting for covariates it is important to consider if the covariate being included is something that could be affected by the treatment variables, or whether it is something which affects the outcome independent of the treatments. If we were confident that striga infestation was not impacted by the choice of treatment then in this analysis 
+
+<!--chapter:end:06-gxe.Rmd-->
+
+`r if (knitr:::is_html_output()) '
+# References {-}
+'`
+
+<!--chapter:end:07-references.Rmd-->
+

@@ -1,0 +1,321 @@
+#Multi-Environment Trial Analysis
+
+##Section 1: Steps in analysis using R
+1. Install R packages needed
+```{r, eval=FALSE}
+library(ggplot2)
+library(emmeans)
+library(doBy)
+library(lmerTest)
+library(multcompView)
+```
+2. Import data
+```{r, eval=FALSE}
+vartrial <- read.csv("C:/Users/Admin/Desktop/mozvartrial.csv")
+```
+3. Check and update data
+```{r,eval=FALSE}
+summary(vartrial)
+str(vartrial)
+
+vartrial$variety<-factor(vartrial$variety)
+vartrial$trial<-factor(vartrial$trial)
+
+```
+4. Explore data
+```{r, eval=FALSE}
+ggplot(data=vartrial,aes(y=yield,x=varietyname)) +
+  geom_point(aes(colour=environment))
+
+ggplot(data=vartrial,aes(y=yield,x=environment,colour=varietyname,group=varietyname)) +
+  stat_summary(geom="line")
+
+ggplot(data=vartrial,aes(y=yield,x=varietyname))+
+  geom_boxplot(aes(colour=varietyname))+facet_wrap(~environment)
+
+
+summaryBy(yield~varietyname+environment, data=vartrial, FUN=c(mean,median,sd))
+```
+
+5. Specify a model for data
+```{r, eval=FALSE}
+gxemodel1<-lmer(yield~varietyname*environment+(1|rep:environment), data=vartrial)
+
+gxemodel2<-lmer(yield~varietyname*environment+(1|rep:environment)+(1|rep:environment:row)+(1|rep:environment:column), data=vartrial)
+
+anova(gxemodel2,gxemodel1)
+```
+
+6. Check the model
+```{r,eval=FALSE}
+plot(gxemodel2)
+
+qqnorm(resid(gxemodel2))
+qqline(resid(gxemodel2))
+```
+7. Interpret the model
+```{r, eval=FALSE}
+anova(gxemodel2, ddf="Kenward-Roger")
+print(VarCorr(gxemodel2), comp=("Variance"))
+
+ranova(gxemodel2)
+
+```
+
+8. Present the results from the model
+```{r, eval=FALSE}
+emmip(gxemodel2,~varietyname|environment,CIs = TRUE)
+
+emmip(gxemodel2,~varietyname|environment,CIs = TRUE)
+
+
+emmip(gxemodel2,varietyname~environment)+coord_flip()
+
+emmeans(gxemodel2, ~varietyname|environment)
+
+cld(emmeans(gxemodel2, ~varietyname|environment))
+
+estimatedmeans<-data.frame(cld(emmeans(gxemodel2, ~varietyname|environment)))
+estimatedmeans
+library(reshape2)
+dcast(varietyname~environment,value.var="emmean",data=estimatedmeans)
+
+```
+
+
+##Section 2: Explanation of Steps
+###1.	Install R packages needed 
+
+A number of packages following packages were used during data exploration and analysis. For a general introduction explaining what R packages are and how they work, this is a really useful guide https://www.datacamp.com/community/tutorials/r-packages-guide. 
+For each of these packages to be installed, using install.packages(), this requires a reliable internet connection and a correctly installed version of R and RStudio. If you are having difficulties installing these packages please ask for help.
+
+```{r,eval=FALSE}
+install.packages("ggplot2")
+library(ggplot2)
+```
+```ggplot2``` This package provides a powerful graphics language for creating elegant and complex graphs in R.
+```{r,eval=FALSE}
+install.packages("emmeans")
+library(emmeans)
+```
+```emmeans``` Estimated marginal means (also known as least squares means) helps provide expected mean values and confidence intervals from statistical models.
+```{r,eval=FALSE}
+install.packages("doBy")
+library(doBy)
+```
+```doBy```Allows easy production of summary statistic tables
+```{r,eval=FALSE}
+install.packages("lmerTest")
+library(lmerTest)
+```
+```lmerTest``` Allows produce of flexible mixed effects regression models, similar to REML in Genstat.
+
+```{r,eval=FALSE}
+install.packages("multcompView")
+library(multcompView)
+```
+```multcompView``` allows for mean seperation methods on analyses
+
+```{r,include=FALSE,echo=FALSE}
+
+library(multcompView)
+library(ggplot2)
+library(emmeans)
+library(doBy)
+library(lmerTest)
+library(multcompView)
+```
+
+###2.	Import data
+
+Our data set saved as a CSV file, so we can use the read.csv commmand to import the data. We are going to assign the name of the data with R to be ```fallow2```. Remember in R Studio you could also use the "Import Dataset" menu to import a dataset. 
+
+```{r,eval=FALSE}
+vartrial <- read.csv("C:/Users/Admin/Desktop/mozvartrial.csv")
+```
+
+```{r,echo=FALSE}
+vartrial <- read.csv("mozvartrial.csv")
+```
+
+
+###3.	Check and update data
+
+When reading data into R it is always useful to check that data is in the format expected. How many variables are there? How many rows? How have the columns been read in? The summary command can help to show if the data is being treated correctly.
+
+```{r}
+summary(vartrial)
+
+
+```
+
+Where data is being treated as a numeric variable (i.e. a number) ```summary``` provides statistics like the mean, min and max. Where data is being treated like a categorical variable (i.e. a group) then summary provides frequency tables.
+
+
+From the results we can see that the variables rep and plot are being considered as numeric variables. However these are grouping variables, not number variables, the numbers used are simply codes. If we do not rectify this then our analysis later will be incorrect and meaningless.  
+This can also be seen more explicitly using the str() function.
+
+```{r}
+str(vartrial)
+```
+
+So we need to convert these variables into factors. 
+
+```{r}
+vartrial$variety<-factor(vartrial$variety)
+vartrial$trial<-factor(vartrial$trial)
+```
+
+These commands take the column rep within the data frame fallow, converts into a factor and saves the result in a column called rep within fallow.
+
+###4.	Explore data
+
+####Plots
+
+We are now interesting in assessing the relationship between yield and striga - so we want to produce a plot of striga against yield, with different coloured points denoting each treatment.
+
+```{r}
+ggplot(data=vartrial,aes(y=yield,x=varietyname)) +
+  geom_point(aes(colour=environment))
+
+
+
+
+```
+We can see from the distribution of striga that there are some farms with very high levels of striga, and some farms with no striga. The big range of values makes it hard to make interpretations from this plot, so taking a square root transformation may help to visualise the relationship. A log transformation will not help here because of the large number of 0 values of striga.
+
+```{r}
+ggplot(data=vartrial,aes(y=yield,x=environment,colour=varietyname,group=varietyname)) +
+  stat_summary(geom="line")
+
+
+```
+
+
+```{r}
+ggplot(data=vartrial,aes(y=yield,x=varietyname))+
+  geom_boxplot(aes(colour=varietyname))+facet_wrap(~environment)
+```
+
+
+
+####Summary Statistics
+
+To produce summary statistics, by group, there are many options within R. One option is to use the summaryBy function, from the doBy library. The code used for this is quite similar to the code we will use to produce models in a later step.
+
+```{r}
+
+summaryBy(yield~varietyname+environment, data=vartrial, FUN=c(mean,median,sd))
+```
+
+
+###5. Specify a model for data
+
+
+In this design, an RCBD, we have one treatment factor, "treat", and one layout factor "rep". More information about model fitting can be found in section 2.
+
+```{r}
+gxemodel1<-lmer(yield~varietyname*environment+(1|rep:environment), data=vartrial)
+
+gxemodel2<-lmer(yield~varietyname*environment+(1|rep:environment)+(1|rep:environment:row)+(1|rep:environment:column), data=vartrial)
+
+anova(gxemodel2,gxemodel1)
+
+```
+
+
+R is unlike many other software packages in how it fits models. The best way of handling models in R is to assign the model to a name (in this case rcbdmodel1) and then ask R to provide different sorts of output for this model. When you run the above line you will get now output from the data - this is what we expected to see!
+
+###6. Check the model
+
+Before interpretting the model any further we should investigate the model validity, to ensure any conclusions we draw are valid. There are 3 assumptions that we can check for using standard model checking plots.
+1. Homogeneity (equal variance)
+2. Values with high leverage
+3. Normality of residuals
+
+The function plot() when used with a model will plot the fitted values from the model against the expected values.
+
+
+```{r}
+plot(gxemodel2)
+```
+The residual Vs fitted plot is a scatter plot of the Residuals on the y-axis and the fitted on the x-axis and the aim for this plot is to test the assumption of equal variance of the residuals across the range of fitted values. Since the residuals do not funnel out (to form triangular/diamond shape) the assumption of equal variance is met. 
+
+We can also see that there are no extreme values in the residuals which might be potentially causing problems with the validity of our conclusions (leverage)
+
+To assess the assumption of normality we can produce a qqplot. This shows us how closely the residuals follow a normal distribution - if there are severe and syste,matic deviations from the line then we may want to consider an alternative distribution.
+
+```{r}
+qqnorm(resid(gxemodel2))
+qqline(resid(gxemodel2))
+```
+In this case the residuals seem to fit the assumption required for normality.
+
+###7. Interpret Model
+
+The anova() function only prints the rows of analysis of variance table for treatment effects when looking at a mixed model fitted using lmer().
+
+```{r}
+anova(gxemodel2, ddf="Kenward-Roger")
+
+```
+
+ddf=Kenward-Roger tells R which method to use for determining the calculations of the table; this option matches the defaults found within SAS or Genstat. The ANOVA table suggests a highly significant effect of the treatment on the yield.
+
+To obtain the residual variance, and the variance attributed to the blocks we need an additional command. From these number it is possible to reconstruct a more classic ANOVA table, if so desired.
+```{r}
+print(VarCorr(gxemodel2), comp=("Variance"))
+
+ranova(gxemodel2)
+```
+
+###8. Present the results from the model
+
+To help understand what the significant result from the ANOVA table means we can produce several plots and tables to help us. First we can use the function emmip() to produce plots of the modelled results, including 95% confidence intervals.
+
+```{r}
+emmip(gxemodel2,~varietyname|environment,CIs = TRUE)
+
+
+
+
+```
+
+Or alternatively
+```{r}
+emmip(gxemodel2,~varietyname|environment,CIs = TRUE)
+
+
+emmip(gxemodel2,varietyname~environment)+coord_flip()
+
+
+```
+
+
+To obtain the numbers used in creating this graph we can use the function emmeans.
+```{r}
+emmeans(gxemodel2, ~varietyname|environment)
+
+
+
+```
+
+And one method for conducting mean separation analysis, holding striga effect constant, we can use the function cld().
+
+```{r}
+cld(emmeans(gxemodel2, ~varietyname*environment))
+
+cld(emmeans(gxemodel2, ~varietyname|environment))
+
+estimatedmeans<-data.frame(emmeans(gxemodel2, ~varietyname|environment))
+
+envmeans<-data.frame(emmeans(gxemodel2, ~environment))
+
+```
+
+In the output, groups sharing a letter in the .group are not statistically different from each other.
+
+
+##Section 3 – Methodological Principles
+
+When adjusting for covariates it is important to consider if the covariate being included is something that could be affected by the treatment variables, or whether it is something which affects the outcome independent of the treatments. If we were confident that striga infestation was not impacted by the choice of treatment then in this analysis 
